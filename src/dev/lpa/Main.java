@@ -28,6 +28,7 @@ public class Main {
       System.out.println(metaData.getSQLStateType());
       if (!checkSchema(conn)) {
         System.out.println("storefront schema does not exist");
+        setUpSchema(conn);
       }
     } catch (SQLException e) {
       throw new RuntimeException(e);
@@ -49,5 +50,42 @@ public class Main {
       } else throw e;
     }
     return true;
+  }
+  
+  private static void setUpSchema(Connection conn) throws SQLException {
+    
+    String createSchema = "CREATE SCHEMA storefront";
+    
+    String createOrder = """
+      CREATE TABLE storefront.order (
+      order_id int NOT NULL AUTO_INCREMENT,
+      order_date DATETIME NOT NULL,
+      PRIMARY KEY (order_id)
+      )""";
+    
+    String createOrderDetails = """
+      CREATE TABLE storefront.order_details (
+      order_detail_id int NOT NULL AUTO_INCREMENT,
+      item_description text,
+      order_id int DEFAULT NULL,
+      PRIMARY KEY (order_detail_id),
+      KEY FK_ORDERID (order_id),
+      CONSTRAINT FK_ORDERID FOREIGN KEY (order_id)
+      REFERENCES storefront.order (order_id) ON DELETE CASCADE
+      )""";
+    
+    try (Statement statement = conn.createStatement()) {
+      
+      System.out.println("Creating storefront Database");
+      statement.execute(createSchema);
+      if (checkSchema(conn)) {
+        statement.execute(createOrder);
+        System.out.println("Successfully Created Order");
+        statement.execute(createOrderDetails);
+        System.out.println("Successfully Created Order Details");
+      }
+    } catch (SQLException e) {
+      e.printStackTrace();
+    }
   }
 }
