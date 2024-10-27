@@ -12,6 +12,8 @@ public class Main {
   
   private static String USE_SCHEMA = "USE storefront"; // DDL statement to set database
   
+  private static int MYSQL_DB_NOT_FOUND = 1049;
+  
   public static void main(String[] args) {
     
     var dataSource = new MysqlDataSource();
@@ -32,7 +34,7 @@ public class Main {
     }
   }
   
-  private static boolean checkSchema(Connection conn) {
+  private static boolean checkSchema(Connection conn) throws SQLException {
     
     try (Statement statement = conn.createStatement()) {
       statement.execute(USE_SCHEMA);
@@ -41,7 +43,10 @@ public class Main {
       System.err.println("SQLState: " + e.getSQLState());
       System.err.println("Error Code: " + e.getErrorCode());
       System.err.println("Message: " + e.getMessage());
-      return false;
+      if (conn.getMetaData().getDatabaseProductName().equals("MySQL")
+            && e.getErrorCode() == MYSQL_DB_NOT_FOUND) {
+        return false;
+      } else throw e;
     }
     return true;
   }
