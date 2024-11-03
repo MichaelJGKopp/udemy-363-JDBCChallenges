@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.ResolverStyle;
 import java.util.*;
 
 record OrderDetail(int orderDetailId, String itemDescription, int qty) {
@@ -15,8 +16,7 @@ record OrderDetail(int orderDetailId, String itemDescription, int qty) {
     this(-1, itemDescription, qty);
   }
   
-  @Override
-  public String toString() {
+  public String toJSON() {
     return new StringJoiner(", ", "{", "}")
              .add("\"itemDescription\":\"" + itemDescription + "\"")
              .add("\"qty\":" + qty)
@@ -34,6 +34,12 @@ record Order(int orderId, String dateString, List<OrderDetail> details) {
     OrderDetail item = new OrderDetail(itemDescription, qty);
     details.add(item);
   }
+  
+  public String getDetailsJson() {
+    StringJoiner jsonString = new StringJoiner(",", "[", "]");
+    details.forEach((d) -> jsonString.add(d.toJSON()));
+    return jsonString.toString();
+  }
 }
 
 public class ChallengeSolution {
@@ -43,8 +49,8 @@ public class ChallengeSolution {
     var dataSource = new MysqlDataSource();
     dataSource.setServerName("localhost");
     dataSource.setPort(3306);
-    dataSource.setUser(System.getenv("MYSQL_USER"));
-    dataSource.setPassword(System.getenv("MYSQL_PASS"));
+    dataSource.setUser(System.getenv("MYSQLUSER"));
+    dataSource.setPassword(System.getenv("MYSQLPASS"));
     List<Order> orders = readData();
     
     try (Connection conn = dataSource.getConnection()) {
@@ -53,8 +59,35 @@ public class ChallengeSolution {
 //                    "ALTER TABLE storefront.order_details ADD COLUMN quantity INT";
 //            Statement statement = conn.createStatement();
 //            statement.execute(alterString);
+
+//            addOrders(conn, orders);
       
-      addOrders(conn, orders);
+      CallableStatement cs = conn.prepareCall(
+        "{ CALL storefront.addOrder(?, ?, ?, ?) }");
+      
+      DateTimeFormatter formatter =
+        DateTimeFormatter.ofPattern("G yyyy-MM-dd HH:mm:ss")
+          .withResolverStyle(ResolverStyle.STRICT);
+      
+      orders.forEach((o) -> {
+        try {
+          LocalDateTime localDateTime =
+            LocalDateTime.parse("AD " + o.dateString(), formatter);
+          Timestamp timestamp = Timestamp.valueOf(localDateTime);
+          cs.setTimestamp(1, timestamp);
+          cs.setString(2, o.getDetailsJson());
+          cs.registerOutParameter(3, Types.INTEGER);
+          cs.registerOutParameter(4, Types.INTEGER);
+          cs.execute();
+          System.out.printf("%d records inserted for %d (%s)%n",
+            cs.getInt(4),
+            cs.getInt(3),
+            o.dateString());
+        } catch (Exception e) {
+          System.out.printf("Problem with %s : %s%n", o.dateString(),
+            e.getMessage());
+        }
+      });
     } catch (SQLException e) {
       throw new RuntimeException(e);
     }
@@ -141,29 +174,18 @@ public class ChallengeSolution {
         Statement.RETURN_GENERATED_KEYS);
     ) {
       
-      CallableStatement cs = conn.prepareCall("{ CALL storefront.addOrder(?, ?, ?, ?) }");
       orders.forEach((o) -> {
-        
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss");
-        LocalDateTime ldt = LocalDateTime.parse(o.dateString(), dtf);
         try {
-          cs.setTimestamp(1, Timestamp.valueOf(ldt));
-          cs.setString(2, o.details().toString());  // JSON
-          cs.registerOutParameter(3, Types.INTEGER);
-          cs.registerOutParameter(4, Types.INTEGER);
-          
-          cs.execute();
-          int orderId = cs.getInt(3);
-          int insertedRecords = cs.getInt(4);
-          System.out.printf("%s orderId %d insertedRecords %d %n", o.dateString(), orderId, insertedRecords);
+          addOrder(conn, psOrder, psDetail, o);
         } catch (SQLException e) {
-          System.err.println(e.getErrorCode() + " " + e.getMessage());
+          System.err.printf("%d (%s) %s%n", e.getErrorCode(),
+            e.getSQLState(), e.getMessage());
+          System.err.println("Problem: " + psOrder);
+          System.err.println("Order: " + o);
         }
       });
-      
     } catch (SQLException e) {
-      System.err.printf("%d (%s) %s%n", e.getErrorCode(),
-        e.getSQLState(), e.getMessage());
+      throw new RuntimeException(e);
     }
   }
 }
